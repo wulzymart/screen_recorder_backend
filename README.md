@@ -17,3 +17,4 @@ at the end of the recording transcript may be uploaded to the server by a POST r
     c. Ensure recording is completed before closing the connection
 2.  Sending transcript
     a. send transcript as a body of a POST
+    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
