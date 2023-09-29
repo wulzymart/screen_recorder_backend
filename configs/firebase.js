@@ -2,16 +2,15 @@
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getStorage } from 'firebase-admin/storage';
 import dotEnv from 'dotenv';
-import { decryptFile } from '../src/secure-file.js';
-const secureFileName = './service_account.json.secure';
-const jsonStr = await decryptFile(secureFileName);
+import data from '../service_account.json';
+
 dotEnv.config();
 // TODO: Add SDKs for Firebase products that you want to use
 // https://firebase.google.com/docs/web/setup#available-libraries
 
 // Your web app's Firebase configuration
 initializeApp({
-  credential: cert(JSON.parse(jsonStr)),
+  credential: cert(data),
   storageBucket: process.env.STORAGE_BUCKET,
 });
 
