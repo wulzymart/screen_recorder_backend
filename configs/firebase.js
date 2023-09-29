@@ -2,7 +2,7 @@
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getStorage } from 'firebase-admin/storage';
 import dotEnv from 'dotenv';
-import data from '../service_account.json';
+import data from '../service_account.json' assert { type: 'json' };
 
 dotEnv.config();
 // TODO: Add SDKs for Firebase products that you want to use
