@@ -42,9 +42,16 @@ wss.on('connection', async (ws) => {
     }
   });
 });
-app.get('/api/entries:id', async (req, res) => {
+app.get('/api/entries/:id', async (req, res) => {
   const entryData = await Entry.findById(req.params.id);
   if (!entryData) return res.status(404).json({ mssg: 'entry not found' });
+  res.status(200).json(entryData);
+});
+app.delete('/api/entries/:id', async (req, res) => {
+  const entryData = await Entry.findByIdAndDelete(req.params.id);
+  if (!entryData) return res.status(404).json({ mssg: 'entry not found' });
+  await Video.findByIdAndDelete(entryData.videoId)
+  if (entryData.transciptId) await Transcript.findByIdAndDelete(entryData.transciptId)
   res.status(200).json(entryData);
 });
 app.post('/api/entries:id/add_transcript', async (req, res) => {

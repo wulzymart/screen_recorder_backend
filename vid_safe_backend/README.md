@@ -16,11 +16,17 @@ API root = http://martdev.tech:3000
 1.  Saving a live recording
     a. Connect to the server using browser websock api at ws://martdev.tech:3000
     b. Send media recording streams via the opened communication to the server
-    c. Ensure recording is completed before closing the connection
-2.  Sending transcript
-    a. send transcript as a body of a POST /api/{entries_id}/add_transcript
-    b Format {text: transcript_string}
-3.  Get an entry (entry contains id of video and transcript)
-    a. GET "/api/entries/{entry_id}"
-    b Response type {videoId: "id_string", transcriptId: "id_string"}
-4.  Delete an entry DELETE "/api/entries/{entry_id}"
+    c. id of recording video will be sent back as a message from the server. save the id
+    d. Ensure recording is completed before closing the connection
+2.  Get a video entry
+    a. GET "/api/videos/{video_id}"
+    b success Response example
+    {
+    downloadLink: "/URL/AVAILABLE/FOR/24HRS",
+    streamLink: "martdev.tech/api/videos/{video_id}/stream",
+    transciptJson: "transcript data",
+    dateCreated: date of creation,
+    }
+3.  Delete a video DELETE "/api/videos/{video_id}"
+    Success Response
+    { mssg: "video with id {entryid} deleted" }
