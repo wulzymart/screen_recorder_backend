@@ -21,12 +21,16 @@ API root = http://martdev.tech:3000
 2.  Get a video entry
     a. GET "/api/videos/{video_id}"
     b success Response example
+    ```
     {
     downloadLink: "/URL/AVAILABLE/FOR/24HRS",
     streamLink: "martdev.tech/api/videos/{video_id}/stream",
     transciptJson: "transcript data",
     dateCreated: date of creation,
     }
+    ```
 3.  Delete a video DELETE "/api/videos/{video_id}"
     Success Response
+    ```
     { mssg: "video with id {entryid} deleted" }
+    ```
