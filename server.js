@@ -1,87 +1,169 @@
 import http from 'http';
 import express from 'express';
-import { createWriteStream } from 'fs';
+import { createReadStream, createWriteStream, unlink } from 'fs';
 import { WebSocketServer } from 'ws';
-import { v4 as uuidv4 } from 'uuid';
 import dotEnv from 'dotenv';
 import cors from 'cors';
+import ffprobeins from '@ffprobe-installer/ffprobe';
+import ffmpegins from '@ffmpeg-installer/ffmpeg';
+import Ffmpeg from 'fluent-ffmpeg';
 import { bucket } from './configs/firebase.js';
 import { connectDB } from './configs/dbConfig.js';
 import Video from './models/video.js';
-import Transcript from './models/transcript.js';
-import Entry from './models/bothEntities.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import transciptFile from './configs/deepgram.js';
+
 dotEnv.config();
 
-// TODO: link to db
+// setting up video converter
+Ffmpeg.setFfmpegPath(ffmpegins.path);
+Ffmpeg.setFfprobePath(ffprobeins.path);
 
+// to display readme
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// settup the server
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
+// middlewares
 app.use(cors());
+app.use(express.static('public'));
 
+// handle websocket conections to get live video, convert audio and transcribe
 wss.on('connection', async (ws) => {
   console.log('a client connected');
-  const id = uuidv4().toString();
-  const newEntryData = await Entry.create({ created: false });
-  console.log(newEntryData);
-  const vidFile = bucket.file(id + '.webm').createWriteStream({ gzip: true });
-  ws.send(JSON.stringify({ id: newEntryData.id }));
-  ws.on('message', (message) => {
-    vidFile.write(message, 'binary');
-  });
-  ws.on('close', async () => {
-    console.log('A client disconnected');
-    // Close the writable stream when the client disconnects
-    if (vidFile) {
-      vidFile.end();
-      const vidData = await Video.create({ fileId: id });
-      newEntryData.videoId = vidData.id;
-      newEntryData.created = true;
-      await newEntryData.save();
+  let newVideoData = await Video.create({ created: false }); //make a new entry in database and send  id to frontend
+  // creating files
+  const id = newVideoData.id; // to create unique video file
+  const localVidFilePath = path.join(__dirname, 'videos', `${id}.webm`);
+  const localAudFilePath = path.join(__dirname, 'audios', `${id}.mp3`);
+  const vidFileGCS = bucket
+    .file(`${id}.webm`)
+    .createWriteStream({ gzip: true });
+  const localVidFile = createWriteStream(localVidFilePath);
+
+  ws.send(JSON.stringify({ id: newVideoData.id }));
+  ws.on('message', async (message) => {
+    try {
+      localVidFile.write(message, 'binary');
+      vidFileGCS.write(message, 'binary');
+    } catch (error) {
+      console.log(error);
+      await newVideoData.deleteOne();
+      newVideoData = null;
+      ws.send(JSON.stringify({ err: 'error creating file' }));
+      ws.close();
     }
   });
+
+  ws.on('close', async () => {
+    console.log('A client disconnected');
+
+    // Close the writable stream when the client disconnects
+    vidFileGCS.end(async () => {
+      newVideoData.created = true;
+
+      // close local file and generate transcript
+      localVidFile.close(async () => {
+        // convert to audio
+        const command = Ffmpeg(localVidFilePath).toFormat('mp3');
+        command
+          .saveToFile(localAudFilePath)
+
+          .on('progress', () => {
+            console.log('conversion in progress');
+          })
+
+          .on('end', async () => {
+            console.log('conversion done');
+
+            // delete local video file
+            unlink(localVidFilePath, (err) => {
+              if (err) console.log(err);
+              else console.log(localVidFilePath, 'deleted');
+            });
+
+            // get transcription from deepgram
+            const transcript = await transciptFile(
+              createReadStream(localAudFilePath),
+              'mp3'
+            );
+            if (transcript) {
+              // update newData
+              newVideoData.transcipt = JSON.stringify(transcript);
+              await newVideoData.save();
+
+              // delete local audio file
+              unlink(localAudFilePath, (err) => {
+                if (err) console.log(err);
+                else console.log(localAudFilePath, 'deleted');
+              });
+            }
+          })
+
+          .on('error', (err) => {
+            console.log(err);
+          });
+      });
+      await newVideoData.save();
+    });
+  });
 });
-app.get('/api/entries/:id', async (req, res) => {
-  const entryData = await Entry.findById(req.params.id);
-  if (!entryData) return res.status(404).json({ mssg: 'entry not found' });
-  res.status(200).json(entryData);
-});
-app.delete('/api/entries/:id', async (req, res) => {
-  const entryData = await Entry.findByIdAndDelete(req.params.id);
-  if (!entryData) return res.status(404).json({ mssg: 'entry not found' });
-  await Video.findByIdAndDelete(entryData.videoId)
-  if (entryData.transciptId) await Transcript.findByIdAndDelete(entryData.transciptId)
-  res.status(200).json(entryData);
-});
-app.post('/api/entries:id/add_transcript', async (req, res) => {
-  const transcript = req.body;
-  const entryData = await Entry.findById(req.params.id);
-  if (!entryData) {
-    return res.status(404).json({ mssg: 'entry id not found' });
-  }
-  const newtranscript = await Transcript.create({ transcript });
-  entryData.transciptId = newtranscript.id;
-  entryData.save();
-  res.status(200).json(newtranscript);
-});
+
+
+// api routes
 app.get('/api/videos/:id', async (req, res) => {
-  const vidData = await Video.findById(req.params.id);
+  const id = req.params.id;
+  const vidData = await Video.findById(id);
+  console.log(vidData);
   if (!vidData) return res.status(404).json({ mssg: 'file not found' });
-  const vidFile = bucket
-    .file(vidData.fileId + '.webm')
-    .createReadStream({ decompress: true });
+  const vidFile = bucket.file(id + '.webm');
+  if (!(await vidFile.exists()))
+    return res.status(404).json({ mssg: 'file not found' });
+  const response = await vidFile.getSignedUrl({
+    action: 'read',
+    expires: Date.now() + 24 * 60 * 1000,
+  });
+  const signedUrl = response[0];
+  res.status(200).json({
+    downloadLink: signedUrl,
+    streamLink: `${process.env.DOMAIN}/api/videos/${id}/stream`,
+    transciptJson: vidData.transcipt,
+    dateCreated: vidData.createdAt,
+  });
+});
+
+app.get('/api/videos/:id/stream', async (req, res) => {
+  const vidFile = bucket.file(req.params.id + '.webm');
+  if (!(await vidFile.exists()))
+    return res.status(404).json({ mssg: 'file not found' });
   res.setHeader('Content-Type', 'video/webm');
-  vidFile.pipe(res);
+  vidFile.createReadStream().pipe(res);
 });
 
-app.get('/api/transcript/:id', async (req, res) => {
-  const transcipt = await Transcript.findById(req.params.id);
-  if (!transcipt)
-    return res.status(404).json({ mssg: 'transcript not found not found' });
-  res.status(200).json(transcipt);
+app.delete('/api/videos/:id', async (req, res) => {
+  const id = req.params.id;
+  const vidData = await Video.findByIdAndDelete(id);
+  if (!vidData) return res.status(404).json({ mssg: 'file not found' });
+  const vidFile = bucket.file(id + '.webm');
+  if (!(await vidFile.exists()))
+    return res.status(404).json({ mssg: 'file not found' });
+  vidFile.delete(() => {
+    console.log('file deleted');
+  });
+  res.status(200).json({ mssg: `video with id ${id} deleted` });
 });
 
+app.get('/', (req, res) => {
+  res.sendFile(__dirname + '/README.md');
+});
+
+
+// starting server logic
 const start = async () => {
   await connectDB(process.env.MONGO_URI);
   server.listen(process.env.PORT || 3000, () => {

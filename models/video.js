@@ -1,15 +1,17 @@
 import { model, Schema } from 'mongoose';
 
-const videoSchema = new Schema({
-  fileId: {
-    type: String,
-    required: [true, 'enter a file id'],
-    unique: true,
+const videoSchema = new Schema(
+  {
+    transcipt: {
+      type: String,
+      default: '',
+    },
+    created: {
+      type: Boolean,
+      default: false,
+    },
   },
-  transciptId: {
-    type: Schema.Types.ObjectId,
-    ref: 'Transcript',
-  },
-});
+  { timestamps: true }
+);
 
 export default model('Video', videoSchema);
